@@ -1,0 +1,10 @@
+{
+  "description": "Streamline Amazon Vine review writing with a mobile-friendly app featuring customizable templates, easy text output, and one-tap copy functionality.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
