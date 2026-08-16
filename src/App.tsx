@@ -151,6 +151,61 @@ function parseWords(input: string): string[] {
   return input.split('　').map(s => s.trim()).filter(Boolean)
 }
 
+// PCのドラッグリサイズ（CSS resize）はタッチ操作に反応しないため、
+// タップ&ドラッグで高さを変えられる自前のハンドルを追加する
+function ResizableTextarea({
+  className,
+  style,
+  ...rest
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = textareaRef.current
+    if (!el) return
+    e.preventDefault()
+    dragRef.current = { startY: e.clientY, startHeight: el.offsetHeight }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = textareaRef.current
+    if (!dragRef.current || !el) return
+    const delta = e.clientY - dragRef.current.startY
+    el.style.height = `${Math.max(60, dragRef.current.startHeight + delta)}px`
+  }
+
+  const handlePointerUp = () => {
+    dragRef.current = null
+  }
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        {...rest}
+        style={{ ...style, resize: 'none' }}
+        className={className}
+      />
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        className="absolute bottom-0.5 right-0.5 w-6 h-6 cursor-ns-resize touch-none flex items-end justify-end p-1"
+      >
+        <svg width="8" height="8" viewBox="0 0 8 8" style={{ opacity: 0.5 }}>
+          <circle cx="7" cy="1" r="1" fill="currentColor" />
+          <circle cx="7" cy="4" r="1" fill="currentColor" />
+          <circle cx="4" cy="7" r="1" fill="currentColor" />
+          <circle cx="7" cy="7" r="1" fill="currentColor" />
+        </svg>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<'write' | 'manage'>('write')
   const [templates, setTemplates] = useState<Template[]>(loadTemplates)
@@ -259,14 +314,57 @@ export default function App() {
     })
   }
 
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     const data: BackupData = { templates, savedReviews, exportedAt: Date.now() }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const json = JSON.stringify(data, null, 2)
+    const stamp = new Date().toISOString().slice(0, 10)
+    const filename = `vine-review-backup_${stamp}.json`
+    const file = new File([json], filename, { type: 'application/json' })
+
+    // スマホ等: 共有シートを直接開き、Googleドライブ等へワンタップで保存できるようにする
+    const nav = navigator as Navigator & {
+      share?: (data: ShareData) => Promise<void>
+      canShare?: (data: ShareData) => boolean
+    }
+    if (nav.canShare?.({ files: [file] }) && nav.share) {
+      try {
+        await nav.share({ files: [file], title: filename })
+        setExportedMsg(true)
+        setTimeout(() => setExportedMsg(false), 2000)
+        return
+      } catch {
+        // ユーザーが共有をキャンセルした場合は何もしない
+        return
+      }
+    }
+
+    // PC等: File System Access APIで直接「名前を付けて保存」ダイアログを開く
+    const w = window as Window & {
+      showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>
+    }
+    if (w.showSaveFilePicker) {
+      try {
+        const handle = await w.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(json)
+        await writable.close()
+        setExportedMsg(true)
+        setTimeout(() => setExportedMsg(false), 2000)
+        return
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return
+        // 失敗時は従来のダウンロード方式にフォールバック
+      }
+    }
+
+    const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    const stamp = new Date().toISOString().slice(0, 10)
     a.href = url
-    a.download = `vine-review-backup_${stamp}.json`
+    a.download = filename
     a.click()
     URL.revokeObjectURL(url)
     setExportedMsg(true)
@@ -450,7 +548,7 @@ export default function App() {
                         ))}
                       </div>
                     )}
-                    <textarea
+                    <ResizableTextarea
                       rows={2}
                       value={texts[field.name] ?? ''}
                       onChange={e => setTexts(t => ({ ...t, [field.name]: e.target.value }))}
@@ -485,7 +583,7 @@ export default function App() {
                         ×
                       </button>
                     </div>
-                    <textarea
+                    <ResizableTextarea
                       rows={2}
                       value={f.text}
                       onChange={e => updateExtraField(f.id, { text: e.target.value })}
