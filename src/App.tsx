@@ -319,26 +319,8 @@ export default function App() {
     const json = JSON.stringify(data, null, 2)
     const stamp = new Date().toISOString().slice(0, 10)
     const filename = `vine-review-backup_${stamp}.json`
-    const file = new File([json], filename, { type: 'application/json' })
 
-    // スマホ等: 共有シートを直接開き、Googleドライブ等へワンタップで保存できるようにする
-    const nav = navigator as Navigator & {
-      share?: (data: ShareData) => Promise<void>
-      canShare?: (data: ShareData) => boolean
-    }
-    if (nav.canShare?.({ files: [file] }) && nav.share) {
-      try {
-        await nav.share({ files: [file], title: filename })
-        setExportedMsg(true)
-        setTimeout(() => setExportedMsg(false), 2000)
-        return
-      } catch {
-        // ユーザーが共有をキャンセルした場合は何もしない
-        return
-      }
-    }
-
-    // PC等: File System Access APIで直接「名前を付けて保存」ダイアログを開く
+    // File System Access APIが使える環境（主にPC）では直接「名前を付けて保存」ダイアログを開く
     const w = window as Window & {
       showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>
     }
