@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 type Field = {
   name: string
@@ -56,6 +56,14 @@ const BUILTIN_TEMPLATES: Template[] = [
 ]
 
 const STORAGE_KEY = 'vine_all_templates_v2'
+const REVIEWS_STORAGE_KEY = 'vine_saved_reviews_v1'
+
+type SavedReview = {
+  id: string
+  content: string
+  templateName: string
+  createdAt: number
+}
 
 // 旧バージョン（fieldsが文字列配列）のデータも読み込めるように変換
 function normalizeField(f: unknown): Field {
@@ -97,6 +105,42 @@ function saveTemplates(templates: Template[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(templates))
 }
 
+function loadSavedReviews(): SavedReview[] {
+  try {
+    const raw = localStorage.getItem(REVIEWS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveSavedReviews(reviews: SavedReview[]) {
+  localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(reviews))
+}
+
+type BackupData = {
+  templates: Template[]
+  savedReviews: SavedReview[]
+  exportedAt: number
+}
+
+function parseBackupData(raw: string): BackupData | null {
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const templates = Array.isArray(parsed.templates) ? parsed.templates.map(normalizeTemplate) : []
+    const savedReviews = Array.isArray(parsed.savedReviews)
+      ? parsed.savedReviews.filter((r: unknown) => r && typeof r === 'object' && typeof (r as SavedReview).content === 'string')
+      : []
+    if (templates.length === 0) return null
+    return { templates, savedReviews, exportedAt: Date.now() }
+  } catch {
+    return null
+  }
+}
+
 // ② 全角読点（、）区切りで項目名をパース
 function parseFields(input: string): string[] {
   return input.split('、').map(s => s.trim()).filter(Boolean)
@@ -114,6 +158,15 @@ export default function App() {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [texts, setTexts] = useState<Record<string, string>>({})
   const [copied, setCopied] = useState(false)
+  const [savedReviews, setSavedReviews] = useState<SavedReview[]>(loadSavedReviews)
+  const [reviewSaved, setReviewSaved] = useState(false)
+  const [copiedReviewId, setCopiedReviewId] = useState<string | null>(null)
+
+  // バックアップ（エクスポート／インポート）
+  const importInputRef = useRef<HTMLInputElement>(null)
+  const [exportedMsg, setExportedMsg] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importedMsg, setImportedMsg] = useState(false)
 
   // Template builder state
   const [newName, setNewName] = useState('')
@@ -174,6 +227,72 @@ export default function App() {
       setTimeout(() => setCopied(false), 2000)
     } catch {}
   }, [output])
+
+  const handleSaveReview = () => {
+    if (!output.trim()) return
+    const entry: SavedReview = {
+      id: `review_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      content: output,
+      templateName: currentTemplate?.name ?? '',
+      createdAt: Date.now(),
+    }
+    const next = [entry, ...savedReviews]
+    setSavedReviews(next)
+    saveSavedReviews(next)
+    setReviewSaved(true)
+    setTimeout(() => setReviewSaved(false), 2000)
+  }
+
+  const handleCopySavedReview = useCallback(async (id: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedReviewId(id)
+      setTimeout(() => setCopiedReviewId(cur => (cur === id ? null : cur)), 2000)
+    } catch {}
+  }, [])
+
+  const handleExportBackup = () => {
+    const data: BackupData = { templates, savedReviews, exportedAt: Date.now() }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `vine-review-backup_${stamp}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExportedMsg(true)
+    setTimeout(() => setExportedMsg(false), 2000)
+  }
+
+  const handleImportClick = () => {
+    setImportError('')
+    importInputRef.current?.click()
+  }
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const data = parseBackupData(String(reader.result ?? ''))
+      if (!data) {
+        setImportError('ファイルを読み込めませんでした。正しいバックアップファイルか確認してください。')
+        return
+      }
+      setTemplates(data.templates)
+      saveTemplates(data.templates)
+      setSavedReviews(data.savedReviews)
+      saveSavedReviews(data.savedReviews)
+      setSelectedId(data.templates[0]?.id ?? '')
+      setImportError('')
+      setImportedMsg(true)
+      setTimeout(() => setImportedMsg(false), 2000)
+    }
+    reader.onerror = () => setImportError('ファイルの読み込み中にエラーが発生しました。')
+    reader.readAsText(file)
+  }
 
   const handleSaveTemplate = () => {
     const name = newName.trim()
@@ -384,18 +503,32 @@ export default function App() {
             {/* Output */}
             <div style={{ background: c.surface, border: `1px solid ${c.border}` }} className="rounded-2xl overflow-hidden">
               <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2 flex items-center justify-between">
-                <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">プレビュー & コピー</span>
-                <button
-                  onClick={handleCopy}
-                  disabled={!output.trim()}
-                  style={{
-                    background: copied ? '#22c55e' : output.trim() ? c.accent : c.border,
-                    color: output.trim() ? 'white' : c.placeholder,
-                  }}
-                  className="px-4 py-1.5 rounded-xl text-[12px] font-bold transition-all active:scale-95"
-                >
-                  {copied ? '✓ コピー済み' : '📋 コピー'}
-                </button>
+                <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">プレビュー</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCopy}
+                    disabled={!output.trim()}
+                    style={{
+                      background: copied ? '#22c55e' : output.trim() ? c.accent : c.border,
+                      color: output.trim() ? 'white' : c.placeholder,
+                    }}
+                    className="px-4 py-1.5 rounded-xl text-[12px] font-bold transition-all active:scale-95"
+                  >
+                    {copied ? '✓ コピー済み' : '📋 コピー'}
+                  </button>
+                  <button
+                    onClick={handleSaveReview}
+                    disabled={!output.trim()}
+                    style={{
+                      background: reviewSaved ? '#22c55e' : output.trim() ? c.surfaceAlt : c.border,
+                      border: `1px solid ${output.trim() ? c.border : c.border}`,
+                      color: reviewSaved ? 'white' : output.trim() ? c.text : c.placeholder,
+                    }}
+                    className="px-4 py-1.5 rounded-xl text-[12px] font-bold transition-all active:scale-95"
+                  >
+                    {reviewSaved ? '✓ 保存済み' : '💾 保存'}
+                  </button>
+                </div>
               </div>
               <div className="px-4 py-3">
                 {output.trim() ? (
@@ -408,6 +541,87 @@ export default function App() {
           </>
         ) : (
           <>
+            {/* バックアップ（エクスポート／インポート） */}
+            <div style={{ background: c.surface, border: `1px solid ${c.border}` }} className="rounded-2xl overflow-hidden">
+              <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2">
+                <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">バックアップ</span>
+              </div>
+              <div className="px-4 py-4 flex flex-col gap-3">
+                <p style={{ color: c.muted }} className="text-[12px] leading-relaxed">
+                  テンプレートと保存済レビューをファイルに書き出せます。キャッシュ削除や機種変更に備えて、定期的にエクスポートしておくことをおすすめします。
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleExportBackup}
+                    style={{ background: exportedMsg ? '#22c55e' : c.accent }}
+                    className="flex-1 py-2.5 text-white font-bold text-[13px] rounded-xl active:scale-95 transition-transform"
+                  >
+                    {exportedMsg ? '✓ 書き出しました' : '📤 エクスポート'}
+                  </button>
+                  <button
+                    onClick={handleImportClick}
+                    style={{ background: importedMsg ? '#22c55e' : c.surfaceAlt, border: `1px solid ${c.border}`, color: importedMsg ? 'white' : c.text }}
+                    className="flex-1 py-2.5 font-bold text-[13px] rounded-xl active:scale-95 transition-transform"
+                  >
+                    {importedMsg ? '✓ 復元しました' : '📥 インポート'}
+                  </button>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={handleImportFile}
+                    className="hidden"
+                  />
+                </div>
+                {importError && <p className="text-[12px] text-red-400 font-medium">{importError}</p>}
+                <p style={{ color: c.placeholder }} className="text-[11px]">
+                  インポートすると、現在のテンプレートと保存済レビューはファイルの内容で置き換えられます。
+                </p>
+              </div>
+            </div>
+
+            {/* 保存済レビュー */}
+            <div style={{ background: c.surface, border: `1px solid ${c.border}` }} className="rounded-2xl overflow-hidden">
+              <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2">
+                <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">
+                  保存済レビュー（{savedReviews.length}件）
+                </span>
+              </div>
+              {savedReviews.length === 0 ? (
+                <p style={{ color: c.placeholder }} className="text-[13px] px-4 py-3">保存されたレビューはありません</p>
+              ) : (
+                <div>
+                  {savedReviews.map((r, i) => (
+                    <div key={r.id} style={{ borderTop: i > 0 ? `1px solid ${c.divider}` : 'none' }} className="px-4 py-3 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[14px] font-semibold truncate">{r.templateName || '無題'}</p>
+                        <p style={{ color: c.muted }} className="text-[12px] mt-0.5 truncate">{r.content.replace(/\n/g, ' ')}</p>
+                      </div>
+                      <button
+                        onClick={() => handleCopySavedReview(r.id, r.content)}
+                        style={{
+                          background: copiedReviewId === r.id ? '#22c55e' : c.surfaceAlt,
+                          color: copiedReviewId === r.id ? 'white' : c.muted,
+                        }}
+                        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
+                      >
+                        {copiedReviewId === r.id ? (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M1 7l3.5 3.5L13 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M4.5 1.75h4.086a.75.75 0 0 1 .53.22l1.914 1.914a.75.75 0 0 1 .22.53V11.5a.75.75 0 0 1-.75.75h-6a.75.75 0 0 1-.75-.75v-9a.75.75 0 0 1 .75-.75z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                            <path d="M8.25 1.9V4a.75.75 0 0 0 .75.75h2.1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Template builder */}
             <div style={{ background: c.surface, border: `1px solid ${c.border}` }} className="rounded-2xl overflow-hidden">
               <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2">
