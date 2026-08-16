@@ -251,6 +251,14 @@ export default function App() {
     } catch {}
   }, [])
 
+  const handleDeleteSavedReview = (id: string) => {
+    setSavedReviews(cur => {
+      const next = cur.filter(r => r.id !== id)
+      saveSavedReviews(next)
+      return next
+    })
+  }
+
   const handleExportBackup = () => {
     const data: BackupData = { templates, savedReviews, exportedAt: Date.now() }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -597,25 +605,36 @@ export default function App() {
                         <p className="text-[14px] font-semibold truncate">{r.templateName || '無題'}</p>
                         <p style={{ color: c.muted }} className="text-[12px] mt-0.5 truncate">{r.content.replace(/\n/g, ' ')}</p>
                       </div>
-                      <button
-                        onClick={() => handleCopySavedReview(r.id, r.content)}
-                        style={{
-                          background: copiedReviewId === r.id ? '#22c55e' : c.surfaceAlt,
-                          color: copiedReviewId === r.id ? 'white' : c.muted,
-                        }}
-                        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
-                      >
-                        {copiedReviewId === r.id ? (
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => handleCopySavedReview(r.id, r.content)}
+                          style={{
+                            background: copiedReviewId === r.id ? '#22c55e' : c.surfaceAlt,
+                            color: copiedReviewId === r.id ? 'white' : c.muted,
+                          }}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
+                        >
+                          {copiedReviewId === r.id ? (
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                              <path d="M1 7l3.5 3.5L13 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                              <path d="M4.5 1.75h4.086a.75.75 0 0 1 .53.22l1.914 1.914a.75.75 0 0 1 .22.53V11.5a.75.75 0 0 1-.75.75h-6a.75.75 0 0 1-.75-.75v-9a.75.75 0 0 1 .75-.75z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                              <path d="M8.25 1.9V4a.75.75 0 0 0 .75.75h2.1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSavedReview(r.id)}
+                          style={{ background: '#2a1515', color: '#f87171' }}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
+                        >
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <path d="M1 7l3.5 3.5L13 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M1.75 3.5h10.5M5.25 3.5V2.625a.875.875 0 0 1 .875-.875h1.75a.875.875 0 0 1 .875.875V3.5m1.312 0L9.625 11.375a.875.875 0 0 1-.875.875H5.25a.875.875 0 0 1-.875-.875L3.938 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                           </svg>
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <path d="M4.5 1.75h4.086a.75.75 0 0 1 .53.22l1.914 1.914a.75.75 0 0 1 .22.53V11.5a.75.75 0 0 1-.75.75h-6a.75.75 0 0 1-.75-.75v-9a.75.75 0 0 1 .75-.75z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                            <path d="M8.25 1.9V4a.75.75 0 0 0 .75.75h2.1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                      </button>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
