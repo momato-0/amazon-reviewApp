@@ -57,6 +57,9 @@ const BUILTIN_TEMPLATES: Template[] = [
 
 const STORAGE_KEY = 'vine_all_templates_v2'
 const REVIEWS_STORAGE_KEY = 'vine_saved_reviews_v1'
+const REVIEW_DOC_URL = 'https://docs.google.com/document/d/1iIZbDGI02ak5A7sjxSE-YWgJu3bYEb-O2CVZQZkR7MM/edit?usp=sharing'
+const REVIEW_DOC_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxo-7HdQ-XXEBv8a9e-BsLZiNBEUd85VGmQwi6QY166Lzri59_-M7a774or_n7P6DI/exec'
+const REVIEW_DOC_WEBHOOK_TOKEN = 'MlONdCwoXgge8T2rlStOdS48Fyc_devk'
 
 type SavedReview = {
   id: string
@@ -243,7 +246,10 @@ export default function App() {
     if (!currentTemplate) return
     const init: Record<string, boolean> = {}
     const initT: Record<string, string> = {}
-    currentTemplate.fields.forEach(f => { init[f.name] = true; initT[f.name] = '' })
+    currentTemplate.fields.forEach(f => {
+      init[f.name] = currentTemplate.id === 'anything' ? f.name === '使用感' : true
+      initT[f.name] = ''
+    })
     setChecked(init)
     setTexts(initT)
     setExtraFields([])
@@ -296,6 +302,12 @@ export default function App() {
     saveSavedReviews(next)
     setReviewSaved(true)
     setTimeout(() => setReviewSaved(false), 2000)
+
+    fetch(REVIEW_DOC_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ token: REVIEW_DOC_WEBHOOK_TOKEN, title: entry.templateName, content: entry.content }),
+    }).catch(() => {})
   }
 
   const handleCopySavedReview = useCallback(async (id: string, content: string) => {
@@ -498,23 +510,33 @@ export default function App() {
               <div>
                 {(currentTemplate?.fields ?? []).map((field, i) => (
                   <div key={field.name} style={{ borderTop: i > 0 ? `1px solid ${c.divider}` : 'none' }} className="px-4 py-3">
-                    <label className="flex items-center gap-2.5 cursor-pointer mb-2">
-                      <div
-                        onClick={() => setChecked(ch => ({ ...ch, [field.name]: !ch[field.name] }))}
-                        style={{
-                          background: checked[field.name] ? c.accent : 'transparent',
-                          border: `2px solid ${checked[field.name] ? c.accent : c.muted}`,
-                        }}
-                        className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all"
+                    <div className="flex items-center justify-between gap-2.5 mb-2">
+                      <label className="flex items-center gap-2.5 cursor-pointer min-w-0">
+                        <div
+                          onClick={() => setChecked(ch => ({ ...ch, [field.name]: !ch[field.name] }))}
+                          style={{
+                            background: checked[field.name] ? c.accent : 'transparent',
+                            border: `2px solid ${checked[field.name] ? c.accent : c.muted}`,
+                          }}
+                          className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all"
+                        >
+                          {checked[field.name] && (
+                            <svg width="11" height="8" viewBox="0 0 11 8" fill="none">
+                              <path d="M1 4l3 3 6-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </div>
+                        <span className="text-[14px] font-semibold truncate">{field.name}</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setTexts(t => ({ ...t, [field.name]: '' }))}
+                        style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold flex-shrink-0 active:scale-95 transition-transform"
                       >
-                        {checked[field.name] && (
-                          <svg width="11" height="8" viewBox="0 0 11 8" fill="none">
-                            <path d="M1 4l3 3 6-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                      </div>
-                      <span className="text-[14px] font-semibold">{field.name}</span>
-                    </label>
+                        クリア
+                      </button>
+                    </div>
                     {field.words.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {field.words.map((word, wi) => (
@@ -670,10 +692,24 @@ export default function App() {
 
             {/* 保存済レビュー */}
             <div style={{ background: c.surface, border: `1px solid ${c.border}` }} className="rounded-2xl overflow-hidden">
-              <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2">
+              <div style={{ borderBottom: `1px solid ${c.divider}` }} className="px-4 pt-4 pb-2 flex items-center justify-between gap-2">
                 <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">
                   保存済レビュー（{savedReviews.length}件）
                 </span>
+                <a
+                  href={REVIEW_DOC_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
+                  title="レビュー用Googleドキュメントを開く"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M6 2.5H3.75a1.25 1.25 0 0 0-1.25 1.25v6.5a1.25 1.25 0 0 0 1.25 1.25h6.5a1.25 1.25 0 0 0 1.25-1.25V8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8.5 1.75h3.75V5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M12 2 6.75 7.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </a>
               </div>
               {savedReviews.length === 0 ? (
                 <p style={{ color: c.placeholder }} className="text-[13px] px-4 py-3">保存されたレビューはありません</p>
