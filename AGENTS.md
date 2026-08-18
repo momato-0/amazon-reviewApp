@@ -1,13 +1,10 @@
-# figma-make-app
+# amazon-reviewApp
 
-React + Vite + Tailwind CSS project running inside Figma Make.
+React + Vite + Tailwind CSS project, deployed to GitHub Pages via `.github/workflows/deploy.yml`.
 
 ## Development Server
 
-A Vite development server is **already running** on `$PORT` (default 8443). You don't need to start it manually.
-
-- Preview URL: The user can access the running app through the preview panel
-- Hot reload: Changes to source files are reflected immediately
+Run `pnpm dev` to start the Vite development server on `$PORT` (default 8443).
 
 ## Project Structure
 
@@ -18,7 +15,7 @@ This is the canonical project structure. Start with task-relevant files below. O
 - `src/index.css` - Global CSS entrypoint and Tailwind CSS v4 import
 - `index.html` - Vite HTML shell containing the `#root` element and loading `src/main.tsx`
 - `package.json` - Project dependencies and the Vite build, development, preview, and formatting scripts
-- `vite.config.ts` - Vite configuration with React, Tailwind CSS v4, and Figma Make plugins plus the `@` alias for `src`
+- `vite.config.ts` - Vite configuration with React, Tailwind CSS v4, the `@` alias for `src`, and the `BASE_PATH` env var used for the GitHub Pages subpath
 - `.mise.toml` - Toolchain versions for Node.js and pnpm
 
 ## Dependencies
