@@ -21,3 +21,5 @@ logs/
 
 # Local-only assets, not pushed to remote
 /photo-AmazonVine/
+public/*.svg
+public/*.png
