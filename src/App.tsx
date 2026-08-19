@@ -242,8 +242,23 @@ export default function App() {
 
   const currentTemplate = templates.find(t => t.id === selectedId) ?? templates[0]
 
+  // 保存済レビューの「下書き」復元用（selectedId変更後の初期化useEffectを一度だけ上書きする）
+  const draftToRestoreRef = useRef<{
+    checked: Record<string, boolean>
+    texts: Record<string, string>
+    extraFields: { id: string; title: string; text: string }[]
+  } | null>(null)
+
   useEffect(() => {
     if (!currentTemplate) return
+    if (draftToRestoreRef.current) {
+      const draft = draftToRestoreRef.current
+      draftToRestoreRef.current = null
+      setChecked(draft.checked)
+      setTexts(draft.texts)
+      setExtraFields(draft.extraFields)
+      return
+    }
     const init: Record<string, boolean> = {}
     const initT: Record<string, string> = {}
     currentTemplate.fields.forEach(f => {
@@ -324,6 +339,47 @@ export default function App() {
       saveSavedReviews(next)
       return next
     })
+  }
+
+  // 保存済レビューの内容（【項目名】\n本文）を元のテキストフィールドへ復元する
+  const handleRestoreDraft = (review: SavedReview) => {
+    const blocks = review.content
+      .split('\n\n')
+      .map(b => {
+        const m = b.match(/^【(.+?)】\n([\s\S]*)$/)
+        return m ? { title: m[1], text: m[2] } : null
+      })
+      .filter((b): b is { title: string; text: string } => b !== null)
+
+    const template = templates.find(t => t.name === review.templateName) ?? currentTemplate
+    const nextChecked: Record<string, boolean> = {}
+    const nextTexts: Record<string, string> = {}
+    const nextExtra: { id: string; title: string; text: string }[] = []
+
+    template?.fields.forEach(f => {
+      nextChecked[f.name] = false
+      nextTexts[f.name] = ''
+    })
+
+    blocks.forEach(b => {
+      const field = template?.fields.find(f => f.name === b.title)
+      if (field) {
+        nextChecked[b.title] = true
+        nextTexts[b.title] = b.text
+      } else {
+        nextExtra.push({ id: `extra_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, title: b.title, text: b.text })
+      }
+    })
+
+    if (template && template.id === selectedId) {
+      setChecked(nextChecked)
+      setTexts(nextTexts)
+      setExtraFields(nextExtra)
+    } else {
+      draftToRestoreRef.current = { checked: nextChecked, texts: nextTexts, extraFields: nextExtra }
+      setSelectedId(template?.id ?? selectedId)
+    }
+    setTab('write')
   }
 
   const handleExportBackup = async () => {
@@ -658,7 +714,7 @@ export default function App() {
               </div>
               <div className="px-4 py-4 flex flex-col gap-3">
                 <p style={{ color: c.muted }} className="text-[12px] leading-relaxed">
-                  テンプレートと保存済レビューをファイルに書き出せます。キャッシュ削除や機種変更に備えて、定期的にエクスポートしておくことをおすすめします。
+                  テンプレートと保存済レビューをファイルに書き出せます。
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -722,6 +778,16 @@ export default function App() {
                         <p style={{ color: c.muted }} className="text-[12px] mt-0.5 truncate">{r.content.replace(/\n/g, ' ')}</p>
                       </div>
                       <div className="flex gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => handleRestoreDraft(r)}
+                          style={{ background: c.surfaceAlt, color: c.muted }}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
+                          title="下書きとして復元"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M8.5 1.75l3.75 3.75-7.5 7.5H1v-3.75l7.5-7.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
                         <button
                           onClick={() => handleCopySavedReview(r.id, r.content)}
                           style={{
