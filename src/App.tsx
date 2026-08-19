@@ -343,13 +343,14 @@ export default function App() {
 
   // 保存済レビューの内容（【項目名】\n本文）を元のテキストフィールドへ復元する
   const handleRestoreDraft = (review: SavedReview) => {
-    const blocks = review.content
-      .split('\n\n')
-      .map(b => {
-        const m = b.match(/^【(.+?)】\n([\s\S]*)$/)
-        return m ? { title: m[1], text: m[2] } : null
-      })
-      .filter((b): b is { title: string; text: string } => b !== null)
+    // フィールド本文中の空行（段落区切り）でも「\n\n」が現れるため、
+    // 単純な split('\n\n') だと2つ目以降の段落が失われる。
+    // 次の見出し（\n\n【...】\n）の直前までを本文として扱うことで、
+    // 本文内の空行を保持したまま項目単位で分割する。
+    const blocks = [...review.content.matchAll(/【([^】]+)】\n([\s\S]*?)(?=\n\n【[^】]+】\n|$)/g)].map(m => ({
+      title: m[1],
+      text: m[2],
+    }))
 
     const template = templates.find(t => t.name === review.templateName) ?? currentTemplate
     const nextChecked: Record<string, boolean> = {}
