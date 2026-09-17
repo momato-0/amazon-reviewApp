@@ -17,11 +17,7 @@ const BUILTIN_TEMPLATES: Template[] = [
     id: 'anything',
     name: 'なんでも',
     builtin: true,
-    fields: [
-      { name: '使用感', words: [] },
-      { name: '耐久性', words: [] },
-      { name: '気づき', words: [] },
-    ],
+    fields: [],
   },
   {
     id: 'shampoo',
@@ -55,11 +51,14 @@ const BUILTIN_TEMPLATES: Template[] = [
   },
 ]
 
+// 「なんでも」テンプレートの自由記入欄に添えるよく使うワード
+const ANYTHING_WORDS = ['■ 使用感', '■ 耐久性', '【〇】', '【△】', '【×】', '■ ']
+
 const STORAGE_KEY = 'vine_all_templates_v2'
 const REVIEWS_STORAGE_KEY = 'vine_saved_reviews_v1'
-const REVIEW_DOC_URL = 'https://docs.google.com/document/d/1iIZbDGI02ak5A7sjxSE-YWgJu3bYEb-O2CVZQZkR7MM/edit?usp=sharing'
-const REVIEW_DOC_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxo-7HdQ-XXEBv8a9e-BsLZiNBEUd85VGmQwi6QY166Lzri59_-M7a774or_n7P6DI/exec'
-const REVIEW_DOC_WEBHOOK_TOKEN = 'MlONdCwoXgge8T2rlStOdS48Fyc_devk'
+const REVIEW_SHEET_URL = 'https://docs.google.com/spreadsheets/d/11tiqEhEXqC1Iyh7ibQExjZoWM24tKBnTk7QFw88seb8/edit?gid=0#gid=0'
+const REVIEW_SHEET_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz3OfNWNMEw-RPI1rl8TeeycrneZnrRE36FYazJUth3k49Z6eHTX1CiNd_fIHVeuAAYxQ/exec'
+const REVIEW_SHEET_WEBHOOK_TOKEN = 'MlONdCwoXgge8T2rlStOdS48Fyc_devk'
 
 type SavedReview = {
   id: string
@@ -91,8 +90,12 @@ function loadTemplates(): Template[] {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return BUILTIN_TEMPLATES
     // 未編集の標準テンプレートは常に最新のコード定義を使う（保存済みキャッシュで古い項目が残るのを防ぐ）
+    // 「なんでも」は自由記入欄専用のハードコード仕様のため、過去に編集済みでも常に最新定義に強制する
     return parsed.map(t => {
       const normalized = normalizeTemplate(t)
+      if (normalized.id === 'anything') {
+        return BUILTIN_TEMPLATES.find(b => b.id === 'anything') ?? normalized
+      }
       if (normalized.builtin) {
         const latest = BUILTIN_TEMPLATES.find(b => b.id === normalized.id)
         if (latest) return latest
@@ -226,6 +229,10 @@ export default function App() {
   const [importError, setImportError] = useState('')
   const [importedMsg, setImportedMsg] = useState(false)
 
+  // スプレッドシートからの取り込み
+  const [sheetSyncing, setSheetSyncing] = useState(false)
+  const [sheetSyncMsg, setSheetSyncMsg] = useState('')
+
   // Template builder state
   const [newName, setNewName] = useState('')
   const [newFields, setNewFields] = useState('')
@@ -240,6 +247,9 @@ export default function App() {
   // ③ フォームに後から追加できる自由項目
   const [extraFields, setExtraFields] = useState<{ id: string; title: string; text: string }[]>([])
 
+  // 「なんでも」テンプレート限定：チェックボックスなしの自由記入欄（見出しなしで出力）
+  const [freeNote, setFreeNote] = useState('')
+
   const currentTemplate = templates.find(t => t.id === selectedId) ?? templates[0]
 
   // 保存済レビューの「下書き」復元用（selectedId変更後の初期化useEffectを一度だけ上書きする）
@@ -247,6 +257,7 @@ export default function App() {
     checked: Record<string, boolean>
     texts: Record<string, string>
     extraFields: { id: string; title: string; text: string }[]
+    freeNote: string
   } | null>(null)
 
   useEffect(() => {
@@ -257,20 +268,23 @@ export default function App() {
       setChecked(draft.checked)
       setTexts(draft.texts)
       setExtraFields(draft.extraFields)
+      setFreeNote(draft.freeNote)
       return
     }
     const init: Record<string, boolean> = {}
     const initT: Record<string, string> = {}
     currentTemplate.fields.forEach(f => {
-      init[f.name] = currentTemplate.id === 'anything' ? f.name === '使用感' : true
+      init[f.name] = true
       initT[f.name] = ''
     })
     setChecked(init)
     setTexts(initT)
     setExtraFields([])
+    setFreeNote('')
   }, [selectedId, templates])
 
   const output = [
+    ...(currentTemplate?.id === 'anything' && freeNote.trim() ? [freeNote] : []),
     ...(currentTemplate?.fields ?? [])
       .filter(f => checked[f.name])
       .map(f => `【${f.name}】\n${texts[f.name] || ''}`),
@@ -318,10 +332,16 @@ export default function App() {
     setReviewSaved(true)
     setTimeout(() => setReviewSaved(false), 2000)
 
-    fetch(REVIEW_DOC_WEBHOOK_URL, {
+    fetch(REVIEW_SHEET_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token: REVIEW_DOC_WEBHOOK_TOKEN, title: entry.templateName, content: entry.content }),
+      body: JSON.stringify({
+        token: REVIEW_SHEET_WEBHOOK_TOKEN,
+        id: entry.id,
+        title: entry.templateName,
+        content: entry.content,
+        createdAt: new Date(entry.createdAt).toISOString(),
+      }),
     }).catch(() => {})
   }
 
@@ -347,6 +367,9 @@ export default function App() {
     // 単純な split('\n\n') だと2つ目以降の段落が失われる。
     // 次の見出し（\n\n【...】\n）の直前までを本文として扱うことで、
     // 本文内の空行を保持したまま項目単位で分割する。
+    const firstMarkerIndex = review.content.search(/【[^】]+】\n/)
+    const leadingNote = firstMarkerIndex > 0 ? review.content.slice(0, firstMarkerIndex).replace(/\n\n$/, '') : ''
+
     const blocks = [...review.content.matchAll(/【([^】]+)】\n([\s\S]*?)(?=\n\n【[^】]+】\n|$)/g)].map(m => ({
       title: m[1],
       text: m[2],
@@ -356,6 +379,7 @@ export default function App() {
     const nextChecked: Record<string, boolean> = {}
     const nextTexts: Record<string, string> = {}
     const nextExtra: { id: string; title: string; text: string }[] = []
+    const nextFreeNote = template?.id === 'anything' ? leadingNote : ''
 
     template?.fields.forEach(f => {
       nextChecked[f.name] = false
@@ -376,8 +400,9 @@ export default function App() {
       setChecked(nextChecked)
       setTexts(nextTexts)
       setExtraFields(nextExtra)
+      setFreeNote(nextFreeNote)
     } else {
-      draftToRestoreRef.current = { checked: nextChecked, texts: nextTexts, extraFields: nextExtra }
+      draftToRestoreRef.current = { checked: nextChecked, texts: nextTexts, extraFields: nextExtra, freeNote: nextFreeNote }
       setSelectedId(template?.id ?? selectedId)
     }
     setTab('write')
@@ -449,6 +474,43 @@ export default function App() {
     }
     reader.onerror = () => setImportError('ファイルの読み込み中にエラーが発生しました。')
     reader.readAsText(file)
+  }
+
+  // スプレッドシートの内容を取得し、まだ手元にないレビューだけ「保存済みレビュー」に追加する
+  const handleSyncFromSheet = async () => {
+    setSheetSyncing(true)
+    setSheetSyncMsg('')
+    try {
+      const url = `${REVIEW_SHEET_WEBHOOK_URL}?token=${encodeURIComponent(REVIEW_SHEET_WEBHOOK_TOKEN)}`
+      const res = await fetch(url)
+      const data = await res.json()
+      if (!data?.ok || !Array.isArray(data.reviews)) {
+        setSheetSyncMsg('取り込みに失敗しました')
+        return
+      }
+      const existingIds = new Set(savedReviews.map(r => r.id))
+      const fresh: SavedReview[] = data.reviews
+        .filter((r: { id: string; content: string }) => r.content && !existingIds.has(r.id))
+        .map((r: { id: string; title: string; content: string; createdAt: number }) => ({
+          id: r.id,
+          content: r.content,
+          templateName: r.title ?? '',
+          createdAt: r.createdAt ?? Date.now(),
+        }))
+      if (fresh.length === 0) {
+        setSheetSyncMsg('新しいレビューはありませんでした')
+      } else {
+        const next = [...fresh, ...savedReviews]
+        setSavedReviews(next)
+        saveSavedReviews(next)
+        setSheetSyncMsg(`${fresh.length}件取り込みました`)
+      }
+    } catch {
+      setSheetSyncMsg('取り込みに失敗しました')
+    } finally {
+      setSheetSyncing(false)
+      setTimeout(() => setSheetSyncMsg(''), 3000)
+    }
   }
 
   const handleSaveTemplate = () => {
@@ -565,7 +627,43 @@ export default function App() {
                 <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">執筆フォーム</span>
               </div>
               <div>
-                {(currentTemplate?.fields ?? []).map((field, i) => (
+                {currentTemplate?.id === 'anything' && (
+                  <div className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-2.5 mb-2">
+                      <span style={{ color: c.muted }} className="text-[14px] font-semibold">自由記入</span>
+                      <button
+                        type="button"
+                        onClick={() => setFreeNote('')}
+                        style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold flex-shrink-0 active:scale-95 transition-transform"
+                      >
+                        クリア
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {ANYTHING_WORDS.map((word, wi) => (
+                        <button
+                          key={`${word}_${wi}`}
+                          type="button"
+                          onClick={() => setFreeNote(t => t + word)}
+                          style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                          className="px-2.5 py-1 rounded-lg text-[12px] active:scale-95 transition-transform"
+                        >
+                          {word}
+                        </button>
+                      ))}
+                    </div>
+                    <ResizableTextarea
+                      rows={2}
+                      value={freeNote}
+                      onChange={e => setFreeNote(e.target.value)}
+                      placeholder="見出しなしで先頭に入る自由記入欄…"
+                      style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.text }}
+                      className="w-full rounded-xl px-3 py-2 text-[13px] leading-relaxed focus:outline-none transition-all"
+                    />
+                  </div>
+                )}
+                {currentTemplate?.id !== 'anything' && (currentTemplate?.fields ?? []).map((field, i) => (
                   <div key={field.name} style={{ borderTop: i > 0 ? `1px solid ${c.divider}` : 'none' }} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-2.5 mb-2">
                       <label className="flex items-center gap-2.5 cursor-pointer min-w-0">
@@ -753,21 +851,39 @@ export default function App() {
                 <span style={{ color: c.muted }} className="text-[11px] font-semibold uppercase tracking-widest">
                   保存済レビュー（{savedReviews.length}件）
                 </span>
-                <a
-                  href={REVIEW_DOC_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
-                  title="レビュー用Googleドキュメントを開く"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M6 2.5H3.75a1.25 1.25 0 0 0-1.25 1.25v6.5a1.25 1.25 0 0 0 1.25 1.25h6.5a1.25 1.25 0 0 0 1.25-1.25V8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M8.5 1.75h3.75V5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M12 2 6.75 7.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </a>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSyncFromSheet}
+                    disabled={sheetSyncing}
+                    style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-transform"
+                    title="スプレッドシートから取り込む"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={sheetSyncing ? { animation: 'spin 0.8s linear infinite' } : undefined}>
+                      <path d="M12.25 7a5.25 5.25 0 1 1-1.6-3.78" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                      <path d="M12.25 1.75V4.9H9.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <a
+                    href={REVIEW_SHEET_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ background: c.surfaceAlt, border: `1px solid ${c.border}`, color: c.muted }}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-transform"
+                    title="レビュー用スプレッドシートを開く"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M6 2.5H3.75a1.25 1.25 0 0 0-1.25 1.25v6.5a1.25 1.25 0 0 0 1.25 1.25h6.5a1.25 1.25 0 0 0 1.25-1.25V8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8.5 1.75h3.75V5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M12 2 6.75 7.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </a>
+                </div>
               </div>
+              {sheetSyncMsg && (
+                <p style={{ color: c.muted }} className="text-[12px] px-4 pb-2">{sheetSyncMsg}</p>
+              )}
               {savedReviews.length === 0 ? (
                 <p style={{ color: c.placeholder }} className="text-[13px] px-4 py-3">保存されたレビューはありません</p>
               ) : (
